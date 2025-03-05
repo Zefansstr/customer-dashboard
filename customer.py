@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+import re
 
 # Membaca data dari CSV
 df = pd.read_csv("member_report.csv")
@@ -18,8 +19,8 @@ df = df[(df['Deposit Amount'] > 0) | (df['Withdraw Amount'] > 0)]
 # Menghitung selisih transaksi (Net Amount)
 df['Net Amount'] = df['Deposit Amount'] - df['Withdraw Amount']
 
-# Menghitung Profit (anggap Profit = 10% dari Deposit Amount)
-df['Profit'] = df['Net Amount']
+# Menghitung Profit (Profit = Net Amount jika positif, jika tidak 0)
+df['Profit'] = df['Deposit Amount'] - df['Withdraw Amount']
 
 # Menentukan kategori berdasarkan batas Deposit Amount yang ditentukan
 def categorize(amount):
@@ -73,26 +74,17 @@ if menu == "Dashboard":
     st.metric("Total Pelanggan", len(df))
     st.metric("Total Profit", f"RM{df['Profit'].sum():,.2f}")
     
-    # Analisis Visualisasi di Dashboard
-    st.subheader("Distribusi Pelanggan per Grade")
-    grade_counts = df['Grade'].value_counts()
+    # Grafik Profit per Grade
+    st.subheader("Total Profit per Grade")
     fig, ax = plt.subplots()
-    ax.pie(grade_counts, labels=grade_counts.index, autopct='%1.1f%%', startangle=90)
-    st.pyplot(fig)
-
-    st.subheader("Total Deposit per Grade")
-    fig, ax = plt.subplots()
-    df.groupby('Grade')['Deposit Amount'].sum().plot(kind='bar', ax=ax)
+    df.groupby('Grade')['Profit'].sum().plot(kind='bar', ax=ax)
     st.pyplot(fig)
     
-    # Menampilkan Top 10 Pelanggan berdasarkan Deposit dan Withdraw
-    st.subheader("Top 10 Pelanggan dengan Deposit Tertinggi")
-    top_deposit = df.nlargest(10, 'Deposit Amount')[['Username', 'Deposit Amount']]
-    st.dataframe(top_deposit)
-    
-    st.subheader("Top 10 Pelanggan dengan Withdraw Tertinggi")
-    top_withdraw = df.nlargest(10, 'Withdraw Amount')[['Username', 'Withdraw Amount']]
-    st.dataframe(top_withdraw)
+    # Perbandingan Deposit vs Withdraw per Grade
+    st.subheader("Perbandingan Deposit vs Withdraw per Grade")
+    fig, ax = plt.subplots()
+    df.groupby('Grade')[['Deposit Amount', 'Withdraw Amount']].sum().plot(kind='bar', stacked=True, ax=ax)
+    st.pyplot(fig)
     
 elif menu == "Tabel Segmentation":
     st.title("Tabel Customer Segmentation")
@@ -104,17 +96,27 @@ elif menu == "Tabel Segmentation":
     
     filtered_df = df.copy()
     if selected_username:
-        filtered_df = filtered_df[filtered_df["Username"].str.contains(selected_username, case=False, na=False)]
+        filtered_df = filtered_df[filtered_df["Username"].apply(lambda x: bool(re.search(selected_username, x, re.IGNORECASE)))]
     if selected_net_category != "Semua":
         filtered_df = filtered_df[filtered_df["Net Category"] == selected_net_category]
     if show_vip:
         filtered_df = filtered_df[filtered_df["VIP"]]
     
+    # Tombol Reset Filter
+    if st.button("Reset Filter"):
+        selected_username = ""
+        selected_net_category = "Semua"
+        show_vip = False
+    
     for grade in ['AAA', 'A', 'B', 'C', 'D']:
         st.subheader(f"Grade {grade}")
         grade_df = filtered_df[filtered_df['Grade'] == grade][['Username', 'Deposit Amount', 'Withdraw Amount', 'Net Amount', 'Profit', 'Net Category', 'High Withdraw', 'VIP', 'High Risk', 'Grade']]
-        st.dataframe(grade_df)
-        st.write(f"**Total Members in Grade {grade}: {len(grade_df)}**")
+        
+        if grade_df.empty:
+            st.write("🚨 Tidak ada pelanggan di kategori ini.")
+        else:
+            st.dataframe(grade_df)
+            st.write(f"**Total Members in Grade {grade}: {len(grade_df)}**")
     
 elif menu == "Unduh Data":
     st.title("Unduh Data Customer")
