@@ -3,6 +3,9 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import re
 
+# Konfigurasi tema dark mode
+st.set_page_config(page_title="Customer Segmentation", layout="wide")
+
 # Membaca data dari CSV
 df = pd.read_csv("member_report.csv")
 
@@ -50,7 +53,7 @@ def categorize_net(net_amount):
 df['High Withdraw'] = df['Withdraw Amount'] > (df['Deposit Amount'] * 0.5)
 
 # Menentukan VIP & High Risk Customers
-df['VIP'] = df['Deposit Amount'] > 20000
+df['VIP'] = df['Deposit Amount'] > 15000
 df['High Risk'] = (df['Withdraw Amount'] / df['Deposit Amount']) > 0.9
 
 # Pastikan kolom sesuai dengan nama di dataset
@@ -60,39 +63,44 @@ if 'Deposit Amount' in df.columns:
 else:
     st.error("Kolom 'Deposit Amount' tidak ditemukan dalam dataset. Periksa nama kolom di file CSV.")
 
-# Membuat menu navigasi di sidebar
-st.sidebar.title("Menu Navigasi")
-menu = st.sidebar.radio("Pilih Halaman:", ["Dashboard", "Tabel Segmentation", "Unduh Data"])
+# Membuat menu navigasi di sidebar dengan ikon
+st.sidebar.title("📌 Menu Navigasi")
+menu = st.sidebar.radio("📊 Pilih Halaman:", ["📊 Dashboard", "📋 Tabel Segmentation", "📥 Unduh Data"])
 
-if menu == "Dashboard":
-    st.title("Customer Segmentation Dashboard")
+if menu == "📊 Dashboard":
+    st.title("📊 Customer Segmentation Dashboard")
     st.write("Selamat datang di dashboard analisis customer segmentation.")
     
-    # Menampilkan ringkasan angka penting
-    st.metric("Total Deposit", f"RM{df['Deposit Amount'].sum():,.2f}")
-    st.metric("Total Withdraw", f"RM{df['Withdraw Amount'].sum():,.2f}")
-    st.metric("Total Pelanggan", len(df))
-    st.metric("Total Profit", f"RM{df['Profit'].sum():,.2f}")
+    # Menampilkan ringkasan angka penting dalam dua kolom
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total Deposit", f"RM{df['Deposit Amount'].sum():,.2f}")
+        st.metric("Total Withdraw", f"RM{df['Withdraw Amount'].sum():,.2f}")
+    with col2:
+        st.metric("Total Pelanggan", len(df))
+        st.metric("Total Profit", f"RM{df['Profit'].sum():,.2f}")
     
-    # Grafik Profit per Grade
-    st.subheader("Total Profit per Grade")
-    fig, ax = plt.subplots()
-    df.groupby('Grade')['Profit'].sum().plot(kind='bar', ax=ax)
-    st.pyplot(fig)
+    # Grafik Profit per Grade dalam expander
+    with st.expander("📊 Lihat Grafik Profit per Grade"):
+        st.subheader("Total Profit per Grade")
+        fig, ax = plt.subplots()
+        df.groupby('Grade')['Profit'].sum().plot(kind='bar', ax=ax)
+        st.pyplot(fig)
     
-    # Perbandingan Deposit vs Withdraw per Grade
-    st.subheader("Perbandingan Deposit vs Withdraw per Grade")
-    fig, ax = plt.subplots()
-    df.groupby('Grade')[['Deposit Amount', 'Withdraw Amount']].sum().plot(kind='bar', stacked=True, ax=ax)
-    st.pyplot(fig)
+    # Perbandingan Deposit vs Withdraw per Grade dalam expander
+    with st.expander("📊 Lihat Perbandingan Deposit vs Withdraw"):
+        st.subheader("Perbandingan Deposit vs Withdraw per Grade")
+        fig, ax = plt.subplots()
+        df.groupby('Grade')[['Deposit Amount', 'Withdraw Amount']].sum().plot(kind='bar', stacked=True, ax=ax)
+        st.pyplot(fig)
     
-elif menu == "Tabel Segmentation":
-    st.title("Tabel Customer Segmentation")
+elif menu == "📋 Tabel Segmentation":
+    st.title("📋 Tabel Customer Segmentation")
     
     # Filter Username dan Net Category
-    selected_username = st.text_input("Cari Username:", "")
-    selected_net_category = st.selectbox("Pilih Kategori Net Amount:", ["Semua"] + list(df["Net Category"].unique()))
-    show_vip = st.checkbox("Tampilkan Hanya VIP")
+    selected_username = st.text_input("🔎 Cari Username:", "")
+    selected_net_category = st.selectbox("📌 Pilih Kategori Net Amount:", ["Semua"] + list(df["Net Category"].unique()))
+    show_vip = st.checkbox("⭐ Tampilkan Hanya VIP")
     
     filtered_df = df.copy()
     if selected_username:
@@ -103,10 +111,11 @@ elif menu == "Tabel Segmentation":
         filtered_df = filtered_df[filtered_df["VIP"]]
     
     # Tombol Reset Filter
-    if st.button("Reset Filter"):
+    if st.button("🔄 Reset Filter"):
         selected_username = ""
         selected_net_category = "Semua"
         show_vip = False
+        st.toast("✅ Filter telah direset!", icon="🎯")
     
     for grade in ['AAA', 'A', 'B', 'C', 'D']:
         st.subheader(f"Grade {grade}")
@@ -115,13 +124,13 @@ elif menu == "Tabel Segmentation":
         if grade_df.empty:
             st.write("🚨 Tidak ada pelanggan di kategori ini.")
         else:
-            st.dataframe(grade_df)
+            st.dataframe(grade_df.style.format({"Deposit Amount": "RM{:.2f}", "Withdraw Amount": "RM{:.2f}", "Profit": "RM{:.2f}"}))
             st.write(f"**Total Members in Grade {grade}: {len(grade_df)}**")
     
-elif menu == "Unduh Data":
-    st.title("Unduh Data Customer")
+elif menu == "📥 Unduh Data":
+    st.title("📥 Unduh Data Customer")
     st.download_button(
-        label="Download Data CSV",
+        label="📥 Download Data CSV",
         data=df.to_csv(index=False).encode('utf-8'),
         file_name="customer_segmentation.csv",
         mime="text/csv"
