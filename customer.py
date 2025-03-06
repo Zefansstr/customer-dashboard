@@ -1,73 +1,85 @@
+import dash
+import dash_bootstrap_components as dbc
+from dash import dash_table, dcc, html
+from dash.dependencies import Input, Output, State
 import pandas as pd
-import streamlit as st
-import matplotlib.pyplot as plt
+import plotly.express as px
+import base64
+import io
 import re
 
-# Konfigurasi tema dark mode
-st.set_page_config(page_title="Customer Segmentation", layout="wide")
+# ============================
+# 1️⃣ Inisialisasi Aplikasi Dash (Dengan Bootstrap)
+# ============================
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SANDSTONE], suppress_callback_exceptions=True)
+server = app.server  # Untuk deployment
 
-# Autentikasi Login
-USER_CREDENTIALS = {"Check8899": "889900"}
+# ============================
+# 2️⃣ Layout Dashboard dengan Bootstrap
+# ============================
+app.layout = dbc.Container([
+    dcc.Store(id="stored-data"),  # 🔹 Menyimpan data CSV yang diunggah
 
-# Fungsi logout
-def logout():
-    st.session_state.clear()
-    st.rerun()
+    dbc.Row([
+        dbc.Col(html.H1("📊 Customer Segmentation Dashboard", className="text-center mt-4"))
+    ]),
 
-# Cek apakah sudah login
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
+    dbc.Row([
+        dbc.Col(
+            dcc.Upload(
+                id='upload-data',
+                children=dbc.Button("📂 Upload File CSV", color="primary", className="mt-3"),
+                multiple=False
+            ), width=6, className="d-flex justify-content-center"
+        )
+    ]),
 
-if not st.session_state["logged_in"]:
-    st.sidebar.title("🔑 Login")
-    username = st.sidebar.text_input("👤 Username")
-    password = st.sidebar.text_input("🔒 Password", type="password")
-    
-    if st.sidebar.button("Login"):
-        if username in USER_CREDENTIALS and password == USER_CREDENTIALS[username]:
-            st.session_state["logged_in"] = True
-            st.session_state["username"] = username
-            st.success("✅ Login berhasil! Selamat datang.")
-            st.rerun()
-        else:
-            st.error("❌ Login gagal! Periksa username dan password.")
-else:
-    # Tombol logout
-    st.sidebar.button("Logout", on_click=logout)
-    
-    # Membaca data dari CSV
-    df = pd.read_csv("member_report.csv")
+    dbc.Row([
+        dbc.Col(html.Div(id="upload-status", className="mt-2 text-center"), width=12)
+    ]),
 
-    # Membersihkan nama kolom untuk menghindari spasi atau karakter tidak terlihat
+    dbc.Tabs(id="tabs", active_tab="dashboard", children=[
+        dbc.Tab(label="📊 Dashboard", tab_id="dashboard"),
+        dbc.Tab(label="📋 Tabel Segmentation", tab_id="table"),
+        dbc.Tab(label="📥 Unduh Data", tab_id="download"),
+    ], className="mt-3"),
+
+    html.Div(id="tab-content", className="p-3"),
+
+    dcc.Download(id="download-excel"),
+], fluid=True)
+
+# ============================
+# 3️⃣ Fungsi Baca CSV & Segmentasi Pelanggan
+# ============================
+def parse_contents(contents):
+    content_type, content_string = contents.split(',')
+    decoded = base64.b64decode(content_string)
+    df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
+
+    # Bersihkan & proses data
     df.columns = df.columns.str.strip()
-
-    # Menghapus duplikat berdasarkan Username
-    if 'Username' in df.columns:
-        df = df.drop_duplicates(subset=['Username'], keep='first')
-
-    # Menghapus pelanggan yang tidak memiliki Deposit Amount dan Withdraw Amount
+    df = df.drop_duplicates(subset=['Username'], keep='first')
     df = df[(df['Deposit Amount'] > 0) | (df['Withdraw Amount'] > 0)]
-
-    # Menghitung selisih transaksi (Net Amount)
     df['Net Amount'] = df['Deposit Amount'] - df['Withdraw Amount']
+    df['Profit'] = df['Net Amount']
 
-    # Menghitung Profit (Profit = Net Amount jika positif, jika tidak 0)
-    df['Profit'] = df['Net Amount'].apply(lambda x: x if x > 0 else 0)
-
-    # Menentukan kategori berdasarkan batas Deposit Amount yang ditentukan
+    # Menentukan Grade berdasarkan Deposit Amount
     def categorize(amount):
         if amount > 5000:
             return 'AAA'
-        elif amount <= 5000 and amount > 3000:
+        elif amount > 3000:
             return 'A'
-        elif amount <= 3000 and amount > 2000:
+        elif amount > 2000:
             return 'B'
-        elif amount <= 2000 and amount > 1000:
+        elif amount > 1000:
             return 'C'
         else:
             return 'D'
+    
+    df['Grade'] = df['Deposit Amount'].apply(categorize)
 
-    # Menentukan kategori berdasarkan Net Amount
+    # Menentukan Net Category
     def categorize_net(net_amount):
         if net_amount > 5000:
             return 'High Surplus'
@@ -78,82 +90,88 @@ else:
         else:
             return 'Deficit'
 
-    # Menentukan apakah withdraw amount lebih dari 50% dari deposit
-    df['High Withdraw'] = df['Withdraw Amount'] > (df['Deposit Amount'] * 0.5)
+    df['Net Category'] = df['Net Amount'].apply(categorize_net)
 
-    # Menentukan VIP & High Risk Customers
-    df['VIP'] = df['Deposit Amount'] > 20000
-    df['High Risk'] = (df['Withdraw Amount'] / df['Deposit Amount']) > 0.9
+    return df.to_dict('records')  # Simpan sebagai dictionary untuk `dcc.Store`
 
-    # Pastikan kolom sesuai dengan nama di dataset
-    if 'Deposit Amount' in df.columns:
-        df['Grade'] = df['Deposit Amount'].apply(categorize)
-        df['Net Category'] = df['Net Amount'].apply(categorize_net)
+# ============================
+# 4️⃣ Callback Upload File & Dashboard Update
+# ============================
+@app.callback(
+    [Output("upload-status", "children"), Output("stored-data", "data"), Output("tab-content", "children")],
+    [Input("upload-data", "contents"), Input("tabs", "active_tab")],
+    prevent_initial_call=True
+)
+def update_output(contents, selected_tab):
+    if contents:
+        df_data = parse_contents(contents)
     else:
-        st.error("Kolom 'Deposit Amount' tidak ditemukan dalam dataset. Periksa nama kolom di file CSV.")
+        df_data = None
 
-    # Membuat menu navigasi di sidebar dengan ikon
-    st.sidebar.title("📌 Menu Navigasi")
-    menu = st.sidebar.radio("📊 Pilih Halaman:", ["📊 Dashboard", "📋 Tabel Segmentation", "📥 Unduh Data"])
+    if selected_tab == "dashboard":
+        if not df_data:
+            return "⚠️ Silakan unggah file CSV.", None, html.Div()
 
-    if menu == "📊 Dashboard":
-        st.title("📊 Customer Segmentation Dashboard")
-        st.write("Selamat datang di dashboard analisis customer segmentation.")
-        
-        # Menampilkan ringkasan angka penting dalam dua kolom
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Total Deposit", f"RM{df['Deposit Amount'].sum():,.2f}")
-            st.metric("Total Withdraw", f"RM{df['Withdraw Amount'].sum():,.2f}")
-        with col2:
-            st.metric("Total Pelanggan", len(df))
-            st.metric("Total Profit", f"RM{df['Profit'].sum():,.2f}")
-        
-        # Grafik Profit per Grade dalam expander
-        with st.expander("📊 Lihat Grafik Profit per Grade"):
-            st.subheader("Total Profit per Grade")
-            fig, ax = plt.subplots()
-            df.groupby('Grade')['Profit'].sum().plot(kind='bar', ax=ax)
-            st.pyplot(fig)
-        
-        # Perbandingan Deposit vs Withdraw per Grade dalam expander
-        with st.expander("📊 Lihat Perbandingan Deposit vs Withdraw"):
-            st.subheader("Perbandingan Deposit vs Withdraw per Grade")
-            fig, ax = plt.subplots()
-            df.groupby('Grade')[['Deposit Amount', 'Withdraw Amount']].sum().plot(kind='bar', stacked=True, ax=ax)
-            st.pyplot(fig)
-        
-    elif menu == "📋 Tabel Segmentation":
-        st.title("📋 Tabel Customer Segmentation")
-        
-        # Filter Username dan Net Category
-        selected_username = st.text_input("🔎 Cari Username:", "")
-        selected_net_category = st.selectbox("📌 Pilih Kategori Net Amount:", ["Semua"] + list(df["Net Category"].unique()))
-        show_vip = st.checkbox("⭐ Tampilkan Hanya VIP")
-        
-        filtered_df = df.copy()
-        if selected_username:
-            filtered_df = filtered_df[filtered_df["Username"].apply(lambda x: bool(re.search(selected_username, x, re.IGNORECASE)))]
-        if selected_net_category != "Semua":
-            filtered_df = filtered_df[filtered_df["Net Category"] == selected_net_category]
-        if show_vip:
-            filtered_df = filtered_df[filtered_df["VIP"]]
-        
-        for grade in ['AAA', 'A', 'B', 'C', 'D']:
-            st.subheader(f"Grade {grade}")
-            grade_df = filtered_df[filtered_df['Grade'] == grade]
-            
-            if grade_df.empty:
-                st.write("🚨 Tidak ada pelanggan di kategori ini.")
-            else:
-                st.dataframe(grade_df)
-                st.write(f"**Total Members in Grade {grade}: {len(grade_df)}**")
-        
-    elif menu == "📥 Unduh Data":
-        st.title("📥 Unduh Data Customer")
-        st.download_button(
-            label="📥 Download Data CSV",
-            data=df.to_csv(index=False).encode('utf-8'),
-            file_name="customer_segmentation.csv",
-            mime="text/csv"
-        )
+        df = pd.DataFrame(df_data)
+
+        return "✅ File berhasil diunggah!", df_data, dbc.Container([
+            dbc.Row([
+                dbc.Col(dbc.Card([
+                    dbc.CardHeader("💰 Total Deposit"),
+                    dbc.CardBody(html.H4(f"RM{df['Deposit Amount'].sum():,.2f}"))
+                ], color="info", inverse=True), width=4),
+
+                dbc.Col(dbc.Card([
+                    dbc.CardHeader("📉 Total Withdraw"),
+                    dbc.CardBody(html.H4(f"RM{df['Withdraw Amount'].sum():,.2f}"))
+                ], color="danger", inverse=True), width=4),
+
+                dbc.Col(dbc.Card([
+                    dbc.CardHeader("💵 Total Profit"),
+                    dbc.CardBody(html.H4(f"RM{df['Profit'].sum():,.2f}"))
+                ], color="success", inverse=True), width=4)
+            ], className="mt-3"),
+
+            dbc.Row([
+                dcc.Graph(figure=px.bar(df.groupby('Grade')['Profit'].sum().reset_index(), x="Grade", y="Profit", title="Total Profit per Grade")),
+                dcc.Graph(figure=px.bar(df.groupby('Grade')[['Deposit Amount', 'Withdraw Amount']].sum().reset_index(), x="Grade", y=['Deposit Amount', 'Withdraw Amount'], title="Deposit vs Withdraw per Grade", barmode='group'))
+            ], className="mt-3")
+        ])
+
+    elif selected_tab == "table":
+        return "✅ File berhasil diunggah!", df_data, dbc.Container([
+            dcc.Dropdown(
+                id="grade-filter",
+                options=[{"label": g, "value": g} for g in sorted(pd.DataFrame(df_data)["Grade"].unique())],
+                value="AAA",
+                clearable=False
+            ),
+            html.Div(id="table-container")
+        ])
+
+    elif selected_tab == "download":
+        return "✅ File berhasil diunggah!", df_data, html.Div([
+            dbc.Button("📥 Download CSV", id="btn_csv", color="success"),
+            dcc.Download(id="download-dataframe-csv")
+        ])
+
+# ============================
+# 5️⃣ Callback untuk Menampilkan Tabel
+# ============================
+@app.callback(
+    Output("table-container", "children"),
+    [Input("grade-filter", "value")],
+    [State("stored-data", "data")],
+    prevent_initial_call=True
+)
+def update_table(selected_grade, data):
+    df = pd.DataFrame(data)
+    df_filtered = df[df["Grade"] == selected_grade]
+
+    return dash_table.DataTable(columns=[{"name": i, "id": i} for i in df_filtered.columns], data=df_filtered.to_dict('records'))
+
+# ============================
+# 6️⃣ Jalankan Aplikasi Dash
+# ============================
+if __name__ == '__main__':
+    app.run_server(debug=True)
